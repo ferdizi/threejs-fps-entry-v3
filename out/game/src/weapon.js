@@ -34,9 +34,12 @@ export const ARMOR_PRICE = 650;
 export const ARMOR_POINTS = 100;
 
 function buildViewModel(def) {
-  const grip = new THREE.MeshBasicMaterial({ color: new THREE.Color('#14171b') });
-  const body = new THREE.MeshBasicMaterial({ color: new THREE.Color('#23272e') });
-  const accent = new THREE.MeshBasicMaterial({ color: new THREE.Color(PALETTE.accent) });
+  // Lit materials on purpose: MeshBasicMaterial ignores lights entirely, so
+  // the vmLight added in createWeapon() had zero effect on the gun (the
+  // 2026-11-16 "dark silhouette" fix). Standard materials let vmLight work.
+  const grip = new THREE.MeshStandardMaterial({ color: new THREE.Color('#3a3f46'), roughness: 0.7, metalness: 0.2 });
+  const body = new THREE.MeshStandardMaterial({ color: new THREE.Color('#8a939e'), roughness: 0.5, metalness: 0.35 });
+  const accent = new THREE.MeshStandardMaterial({ color: new THREE.Color(PALETTE.accent), roughness: 0.5, metalness: 0.1, emissive: new THREE.Color(PALETTE.accent), emissiveIntensity: 0.45 });
   const model = new THREE.Group();
   if (def.id === 'pistol') {
     const slide = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.07, 0.26), body);
@@ -75,7 +78,12 @@ function buildViewModel(def) {
     stock.position.set(0, -0.02, 0.3);
     const sight = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.05, 0.08), accent);
     sight.position.set(0, 0.075, -0.05);
-    model.add(receiver, barrel, stock, sight);
+    // Big orange parts so the gun reads at a glance at 1280x720.
+    const mag = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.17, 0.08), accent);
+    mag.position.set(0, -0.12, -0.05);
+    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.02, 0.3), accent);
+    rail.position.set(0, 0.06, -0.12);
+    model.add(receiver, barrel, stock, sight, mag, rail);
   }
   model.position.set(0.22, -0.2, -0.6);
   model.scale.set(1.6, 1.6, 1.6);
