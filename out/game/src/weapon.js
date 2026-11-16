@@ -34,8 +34,8 @@ export const ARMOR_PRICE = 650;
 export const ARMOR_POINTS = 100;
 
 function buildViewModel(def) {
-  const grip = new THREE.MeshBasicMaterial({ color: new THREE.Color('#3d434c') });
-  const body = new THREE.MeshBasicMaterial({ color: new THREE.Color('#7d8794') });
+  const grip = new THREE.MeshBasicMaterial({ color: new THREE.Color('#14171b') });
+  const body = new THREE.MeshBasicMaterial({ color: new THREE.Color('#23272e') });
   const accent = new THREE.MeshBasicMaterial({ color: new THREE.Color(PALETTE.accent) });
   const model = new THREE.Group();
   if (def.id === 'pistol') {
