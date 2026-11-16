@@ -34,9 +34,9 @@ export const ARMOR_PRICE = 650;
 export const ARMOR_POINTS = 100;
 
 function buildViewModel(def) {
-  const grip = new THREE.MeshStandardMaterial({ color: new THREE.Color('#2e3238'), roughness: 0.75, metalness: 0.2 });
-  const body = new THREE.MeshStandardMaterial({ color: new THREE.Color('#4a515a'), roughness: 0.55, metalness: 0.35 });
-  const accent = new THREE.MeshStandardMaterial({ color: new THREE.Color(PALETTE.accent), roughness: 0.5, metalness: 0.3 });
+  const grip = new THREE.MeshBasicMaterial({ color: new THREE.Color('#3d434c') });
+  const body = new THREE.MeshBasicMaterial({ color: new THREE.Color('#7d8794') });
+  const accent = new THREE.MeshBasicMaterial({ color: new THREE.Color(PALETTE.accent) });
   const model = new THREE.Group();
   if (def.id === 'pistol') {
     const slide = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.07, 0.26), body);
@@ -77,7 +77,12 @@ function buildViewModel(def) {
     sight.position.set(0, 0.075, -0.05);
     model.add(receiver, barrel, stock, sight);
   }
-  model.position.set(0.25, -0.22, -0.7);
+  model.position.set(0.22, -0.2, -0.6);
+  model.scale.set(1.6, 1.6, 1.6);
+  // The viewmodel rides on the camera itself, so Three.js frustum culling
+  // can wrongly discard it (its world-space bounds sit inside the camera).
+  // Never cull the viewmodel — it must always be visible.
+  model.traverse((o) => { o.frustumCulled = false; });
   return model;
 }
 
@@ -86,12 +91,19 @@ export function createWeapon(camera) {
   let model = buildViewModel(def);
   camera.add(model);
 
+  // Dedicated light for the viewmodel so the gun is always clearly visible,
+  // even when the player stands in shadow. Short range so it barely touches the scene.
+  const vmLight = new THREE.PointLight(new THREE.Color('#fff2dd'), 2.5, 3.0, 1.0);
+  vmLight.position.set(0.1, 0.15, -0.35);
+  camera.add(vmLight);
+
   const flash = new THREE.Mesh(
     new THREE.PlaneGeometry(0.17, 0.17),
     new THREE.MeshBasicMaterial({ color: new THREE.Color(PALETTE.sun), transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide }),
   );
   flash.position.set(0.27, -0.16, -1.25);
   flash.visible = false;
+  flash.frustumCulled = false;
   camera.add(flash);
   const flashLight = new THREE.PointLight(new THREE.Color(PALETTE.accent), 0, 6);
   flashLight.position.set(0.27, -0.16, -1.3);
