@@ -118,7 +118,7 @@ function buildViewModel(def) {
     inner.add(curvedMag(0, -0.06, -0.08));
     inner.add(handAndArm(0, -0.105, 0.08, 0.3));
   } else if (def.id === 'shotgun') {
-    inner.add(box(0.09, 0.1, 0.4, metalLight, 0, 0, 0)); // receiver
+    inner.add(box(0.085, 0.095, 0.4, metalLight, 0, 0, 0)); // receiver
     inner.add(cyl(0.03, 0.03, 0.44, metal, 0, 0.02, -0.38, 12)); // barrel
     inner.add(cyl(0.025, 0.025, 0.4, metal, 0, -0.045, -0.36, 10)); // mag tube
     inner.add(box(0.085, 0.075, 0.15, wood, 0, -0.05, -0.3)); // pump
@@ -142,22 +142,23 @@ function buildViewModel(def) {
     inner.add(handAndArm(0, -0.105, 0.08, 0.3));
   } else {
     // KR-77 LONGSHOT rifle — the showcase weapon in all 4 screenshots.
-    inner.add(box(0.09, 0.1, 0.4, metalLight, 0, 0, 0)); // receiver
+    inner.add(box(0.085, 0.095, 0.4, metalLight, 0, 0, 0)); // receiver
     inner.add(box(0.05, 0.015, 0.34, metal, 0, 0.056, -0.02)); // top rail
     for (let i = 0; i < 4; i++) inner.add(box(0.052, 0.008, 0.02, dark, 0, 0.066, -0.14 + i * 0.08)); // rail ridges
     inner.add(box(0.01, 0.02, 0.01, dark, -0.015, 0.068, 0.14)); // rear sight posts
     inner.add(box(0.01, 0.02, 0.01, dark, 0.015, 0.068, 0.14));
     inner.add(box(0.04, 0.006, 0.01, dark, 0, 0.08, 0.14)); // rear sight bar
-    inner.add(cyl(0.022, 0.022, 0.42, metal, 0, 0.02, -0.4, 12)); // ROUND barrel
-    inner.add(cyl(0.033, 0.033, 0.08, metalLight, 0, 0.02, -0.6, 12)); // muzzle brake
-    inner.add(cyl(0.035, 0.035, 0.008, dark, 0, 0.02, -0.58, 12)); // brake grooves
-    inner.add(cyl(0.035, 0.035, 0.008, dark, 0, 0.02, -0.62, 12));
-    inner.add(cyl(0.048, 0.048, 0.3, metal, 0, 0.01, -0.32, 8)); // octagonal dark handguard
-    inner.add(cyl(0.051, 0.051, 0.015, metalLight, 0, 0.01, -0.2, 8)); // handguard bands
-    inner.add(cyl(0.051, 0.051, 0.015, metalLight, 0, 0.01, -0.44, 8));
-    inner.add(cyl(0.008, 0.008, 0.035, dark, 0, 0.065, -0.46, 6)); // front sight post
-    inner.add(box(0.01, 0.025, 0.01, dark, -0.02, 0.06, -0.46)); // front sight wings
-    inner.add(box(0.01, 0.025, 0.01, dark, 0.02, 0.06, -0.46));
+    inner.add(cyl(0.018, 0.018, 0.55, metal, 0, 0.02, -0.48, 12)); // LONG thin round barrel
+    inner.add(cyl(0.028, 0.028, 0.08, metalLight, 0, 0.02, -0.74, 12)); // muzzle brake
+    inner.add(cyl(0.03, 0.03, 0.008, dark, 0, 0.02, -0.72, 12)); // brake grooves
+    inner.add(cyl(0.03, 0.03, 0.008, dark, 0, 0.02, -0.76, 12));
+    inner.add(cyl(0.048, 0.048, 0.36, metal, 0, 0.01, -0.36, 8)); // octagonal dark handguard
+    inner.add(cyl(0.051, 0.051, 0.015, metalLight, 0, 0.01, -0.22, 8)); // handguard bands
+    inner.add(cyl(0.051, 0.051, 0.015, metalLight, 0, 0.01, -0.48, 8));
+    inner.add(box(0.045, 0.12, 0.05, accent, 0, -0.09, -0.3, 0.15)); // orange foregrip (rank-1 teal pump)
+    inner.add(cyl(0.008, 0.008, 0.035, dark, 0, 0.065, -0.55, 6)); // front sight post
+    inner.add(box(0.01, 0.025, 0.01, dark, -0.02, 0.06, -0.55)); // front sight wings
+    inner.add(box(0.01, 0.025, 0.01, dark, 0.02, 0.06, -0.55));
     inner.add(box(0.07, 0.09, 0.24, wood, 0, -0.035, 0.3, -0.1)); // wood stock
     inner.add(box(0.075, 0.1, 0.03, dark, 0, -0.06, 0.42, -0.1)); // butt pad
     inner.add(box(0.05, 0.13, 0.06, woodDark, 0, -0.11, 0.06, 0.35)); // pistol grip
@@ -167,7 +168,7 @@ function buildViewModel(def) {
     inner.add(box(0.004, 0.03, 0.09, dark, 0.046, 0.02, -0.06)); // ejection port
     inner.add(handAndArm(0, -0.11, 0.06, 0.35)); // hand + forearm on the grip
   }
-  model.position.set(0.26, -0.2, -0.62);
+  model.position.set(0.27, -0.22, -0.62);
   model.scale.set(1.25, 1.25, 1.25);
   // The viewmodel rides on the camera itself, so Three.js frustum culling
   // can wrongly discard it (its world-space bounds sit inside the camera).
@@ -191,12 +192,12 @@ export function createWeapon(camera) {
     new THREE.PlaneGeometry(0.17, 0.17),
     new THREE.MeshBasicMaterial({ color: new THREE.Color(PALETTE.sun), transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide }),
   );
-  flash.position.set(0.27, -0.18, -1.5);
+  flash.position.set(0.28, -0.19, -1.65);
   flash.visible = false;
   flash.frustumCulled = false;
   camera.add(flash);
   const flashLight = new THREE.PointLight(new THREE.Color(PALETTE.accent), 0, 6);
-  flashLight.position.set(0.27, -0.18, -1.55);
+  flashLight.position.set(0.28, -0.19, -1.7);
   camera.add(flashLight);
 
   const state = {
