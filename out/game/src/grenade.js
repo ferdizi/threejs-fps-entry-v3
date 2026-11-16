@@ -1,12 +1,4 @@
 // Grenades: HE + smoke, for the player and the bots. Criterion 3 names a grenade
-// explicitly ("more than one weapon and at least one grenade") and v1 had none.
-// A thrown grenade is a small physics projectile: gravity, bounce off colliders
-// (damping 0.4), HE fuses 0.8 s after the first bounce, smoke pops on the first
-// bounce. A grenade that hits dirt digs in (horizontal speed x0.3 per ground
-// bounce) so it goes off roughly where it landed, not 10 m past the target.
-// Smoke clouds block BOT line of sight (segment-vs-sphere test in los);
-// the player's hitscan still passes through smoke — a deliberate simplification,
-// documented here, so the aim test cannot regress.
 import * as THREE from 'three';
 
 export const GRENADES = {
@@ -18,6 +10,10 @@ export const GRENADES = {
     id: 'smoke', name: 'SMOKE GRENADE', price: 300, duration: 18, radius: 3.5,
     desc: 'Bursts into a smoke screen that blocks bot sight for 18 s.',
   },
+  flash: {
+    id: 'flash', name: 'FLASH GRENADE', price: 200, duration: 3, radius: 18,
+    desc: 'Blinds anyone facing it for 3 s. Pop it round a corner.',
+  },
 };
 export const GRENADE_MAX = 2; // per type, per player/bot
 const GRAVITY = 12;
@@ -26,13 +22,13 @@ const MAX_PROJECTILES = 6;
 
 export function createGrenades(scene, world, api) {
   // api: { random, time, damageRadius(pos, radius, maxDmg, throwerTeam, throwerName),
-  //        effects, audio }
   const projectiles = [];
   const clouds = [];
   const probe = new THREE.Box3();
   let thrown = 0;
   let heDetonations = 0;
   let smokePops = 0;
+  let flashPops = 0;
 
   const meshMat = new THREE.MeshStandardMaterial({ color: 0x1a1d20, roughness: 0.5, metalness: 0.4 });
   for (let i = 0; i < MAX_PROJECTILES; i += 1) {
@@ -98,6 +94,13 @@ export function createGrenades(scene, world, api) {
     api.audio.hiss();
   }
 
+  function popFlash(p) {
+    p.alive = false;
+    p.mesh.visible = false;
+    flashPops += 1;
+    if (api.onFlash) api.onFlash(p.pos);
+  }
+
   function step(dt) {
     for (const p of projectiles) {
       if (!p.alive) continue;
@@ -110,7 +113,6 @@ export function createGrenades(scene, world, api) {
       // ground plane (the yard itself is not a collider)
       if (ny < 0.09) {
         // dirt eats momentum: a grenade that hits the ground digs in and
-        // stops near where it landed instead of sliding 10 m past the target
         p.vel.y = Math.abs(p.vel.y) * 0.35;
         p.vel.x *= 0.3;
         p.vel.z *= 0.3;
@@ -138,15 +140,16 @@ export function createGrenades(scene, world, api) {
         p.fuseT = HE_FUSE; // the HE fuse starts on the first bounce
       }
       p.mesh.position.copy(p.pos);
-      if (p.kind === 'smoke' && p.bounced) {
+      if (p.kind === 'flash' && p.bounced) {
+        popFlash(p);
+      } else if (p.kind === 'smoke' && p.bounced) {
         popSmoke(p);
       } else if (p.kind === 'he' && p.bounced) {
         p.fuseT -= dt;
         if (p.fuseT <= 0) detonate(p);
       } else if (!p.bounced && p.age > 2.5) {
-        // safety fuse: a grenade that never bounces (thrown straight up,
-        // or out of bounds) still has to go off
         if (p.kind === 'he') detonate(p);
+        else if (p.kind === 'flash') popFlash(p);
         else popSmoke(p);
       }
     }
@@ -195,6 +198,6 @@ export function createGrenades(scene, world, api) {
     clear,
     segmentBlockedBySmoke,
     get clouds() { return clouds; },
-    get stats() { return { thrown, heDetonations, smokePops, clouds: clouds.length }; },
+    get stats() { return { thrown, heDetonations, smokePops, flashPops, clouds: clouds.length }; },
   };
 }

@@ -1,10 +1,4 @@
 // TIDEWATER map: a container harbor at dawn. 44 x 36 m of playable ground.
-// Two sites: A CRANE YARD (north-west) and B WAREHOUSE (north-east).
-// Attackers spawn south, defenders north. Water and a dawn sky close the north side.
-// v3: multi-level play. Two climbable container platforms (west at (-7,1), east at
-// (5.5,3.2)) with 0.65 m stair steps, joined to the sites by catwalks at 2.6 m, plus
-// a second ground route to B along the east wall. Stairs work because the shared
-// mover auto-steps ledges up to 0.75 m (see player.js); containers (2.6 m) still block.
 import * as THREE from 'three';
 import { PALETTE } from './palette.js';
 import {
@@ -183,8 +177,6 @@ export function createWorld(scene) {
   box(6.1, 2.6, 2.5, 12, 1.3, 1.5, containerMats[3]);
   box(2.5, 2.6, 6.1, 18, 1.3, -5.2, containerMats[2]);
   // v3: the crate stack that sat at (4.5,-1.5) moved to the south wall (-8,15) —
-  // its old spot is the east platform's footprint, and mid-map spots all sit on
-  // the west-mid diagonals (edges 6->7, 9->11, 19->11).
   box(1.2, 1.2, 1.2, -8.0, 0.6, 15.0, mats.wood);
   box(1.2, 1.2, 1.2, -6.8, 0.6, 15.0, mats.wood);
   box(1.2, 1.2, 1.2, -8.0, 1.8, 15.0, mats.wood);
@@ -212,11 +204,9 @@ export function createWorld(scene) {
   box(1.2, 1.2, 1.2, 5.5, 1.8, -6.5, mats.wood);
   box(1.2, 1.2, 1.2, -4.5, 0.6, -6.0, mats.wood);
   // v3: the (6.5,3.5) pallet stack moved to (1.5,5.2) — its old spot is the
-  // east platform's footprint now.
   box(1.2, 1.2, 1.2, 1.5, 0.6, 5.2, mats.wood);
   box(1.2, 1.2, 1.2, 1.5, 1.8, 5.2, mats.wood);
   // v3: the (5.5,-6.5) pallet stack moved to (6.5,16.0) — it stood under the
-  // east catwalk deck, its top touching the deck, and (-2,-7.5) clipped edge 19->11.
   box(1.2, 1.2, 1.2, 6.5, 0.6, 16.0, mats.wood);
   box(1.2, 1.2, 1.2, 6.5, 1.8, 16.0, mats.wood);
   cylinder(0.42, 0.42, 1.0, -1.5, 0.5, 6.5, mats.barrel);
@@ -225,7 +215,6 @@ export function createWorld(scene) {
   cylinder(0.42, 0.42, 1.0, 1.9, 0.5, -7.6, mats.barrel);
   cylinder(0.42, 0.42, 1.0, -9.5, 0.5, 3.5, mats.barrel);
   // v3: the (11.5,-3.5)/(12.4,-3.1) barrels moved to (11.5,-1.0)/(12.4,-0.6) —
-  // they stood on the east wall lane's exit into mid.
   cylinder(0.42, 0.42, 1.0, 11.5, 0.5, -1.0, mats.barrel);
   cylinder(0.42, 0.42, 1.0, 12.4, 0.5, -0.6, mats.barrelBlue);
   box(6.1, 2.6, 2.5, -14, 1.3, 2.5, mats.stencilBay2);
@@ -250,11 +239,6 @@ export function createWorld(scene) {
   group.add(whLamp);
 
   // ---- v3 multi-level: two climbable platforms + catwalks + east wall lane ----
-  // West platform: container top at 2.6 m, reached by three 0.65 m steps up its
-  // south face, left by a catwalk north to site A. East platform mirrors it to B.
-  // Steps are solid boxes from the ground; the mover auto-steps each 0.65 m rise.
-  // Catwalk rails and support posts are visual only (deco), so they never block a
-  // bot walking the deck or the ground beneath it.
   box(6.1, 2.6, 2.5, -7, 1.3, 1.0, containerMats[0]); // west platform container
   box(1.4, 0.65, 0.7, -7, 0.325, 3.3, mats.wood); // west stairs up
   box(1.4, 1.3, 0.7, -7, 0.65, 2.75, mats.wood);
@@ -324,10 +308,51 @@ export function createWorld(scene) {
   const markerA = siteMarker(-15, -10, 'SITE A', PALETTE.accent);
   const markerB = siteMarker(14, -11, 'SITE B', PALETTE.accent);
 
+  // ---- giant site letters painted on the aprons + wall signs (rank 9 style) ----
+  function groundLetter(letter, x, z, color) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = color;
+    ctx.font = 'bold 200px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(letter, 128, 140);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(7, 7), new THREE.MeshBasicMaterial({ map: tex, transparent: true, opacity: 0.9, depthWrite: false }));
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.set(x, 0.02, z);
+    group.add(mesh);
+  }
+  groundLetter('A', -15, -6.2, PALETTE.accent);
+  groundLetter('B', 14, -7.2, PALETTE.accent);
+  function wallSign(text, x, y, z, w, h) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 512;
+    canvas.height = 64;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = 'rgba(10,16,22,0.85)';
+    ctx.fillRect(0, 0, 512, 64);
+    ctx.fillStyle = PALETTE.accent;
+    ctx.font = 'bold 34px monospace';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, 256, 34);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const mesh = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: tex, transparent: true }));
+    mesh.position.set(x, y, z);
+    group.add(mesh);
+  }
+  wallSign('SITE A — CRANE YARD', -15, 3.6, -17.9, 10, 1.25);
+  wallSign('SITE B — WAREHOUSE', 14, 3.1, -6.5, 10, 0.9);
+
   // ---- lighting: low dawn sun from the north-east, cool fill, warm sky ----
   const hemi = new THREE.HemisphereLight(new THREE.Color('#ffd9a0'), new THREE.Color('#1b2a38'), 0.85);
   scene.add(hemi);
-  const sun = new THREE.DirectionalLight(new THREE.Color(PALETTE.sun), 2.6);
+  const sun = new THREE.DirectionalLight(new THREE.Color(PALETTE.sun), 3.0);
   sun.position.set(28, 16, -34);
   sun.target.position.set(0, 0, 0);
   sun.castShadow = true;
@@ -344,15 +369,6 @@ export function createWorld(scene) {
   scene.add(fill);
 
   // ---- spawns ----
-  // (v3 fix: RUE spawned at (15,-16) BEHIND the warehouse back wall and FINN at
-  // (19,-14) behind the interior container — both spent whole rounds pushing a
-  // wall/container they could never pass, because their first waypoint sat on the
-  // far side of it. Both now spawn inside the warehouse with a clear run out.
-  // v3 fix 2: ONNO (B anchor) spawned on the A side (-12,-16) and RUE (A
-  // retaker) on the B side (15,-14), so both walked across mid to reach their
-  // holds and died en route before any plant — RUE died at (9.4,-5) every
-  // round. Swapped: each now spawns on its own side, a short safe walk from
-  // its hold.)
   const spawns = {
     attack: [[-5, 14.5], [-2.5, 14.5], [0, 14.5], [2.5, 14.5], [5, 14.5]],
     defend: [[-17, -15.5], [15, -14], [11, -14.5], [-12, -16], [10, -12]],
@@ -363,11 +379,6 @@ export function createWorld(scene) {
   };
 
   // ---- waypoint graph for bots (nodes + adjacency by id) ----
-  // v3: waypoint 7 moved to (-6,-5) — its old spot (-8,0) is the west platform's
-  // footprint now, and the west lane runs 3 -> 5 -> 6 -> 7 -> 9. Waypoint 8 stays
-  // at (8,0): the east platform was shifted west so the 4->8 lane clears it.
-  // nearestWaypoint is 3D, so a bot on the ground never snaps to a deck node and
-  // a bot on the deck never snaps to a ground node under it.
   const waypoints = [
     { id: 0, x: 0, z: 14.5, y: 0 },
     { id: 1, x: -8, z: 13, y: 0 },

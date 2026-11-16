@@ -1,7 +1,7 @@
 // The DOM HUD: crosshair, hit marker, health/armor, ammo, money, round score, timer,
 // alive counts, kill feed, minimap, buy menu, banners and the overlays.
 // It never touches the simulation; main.js pushes numbers in and reads callbacks out.
-import { WEAPONS, ARMOR_PRICE, ARMOR_POINTS } from './weapon.js';
+import { WEAPONS, ARMOR_PRICE, ARMOR_POINTS, HELMET_PRICE } from './weapon.js';
 import { GRENADES, GRENADE_MAX } from './grenade.js';
 
 export function createHud() {
@@ -24,6 +24,9 @@ export function createHud() {
   const timerEl = $('timer');
   const aliveEl = $('alive');
   const killfeed = $('killfeed');
+  const radioFeed = $('radio');
+  const grenFlash = $('gren-flash');
+  const helmTag = $('helm-tag');
   const banner = $('banner');
   const bannerTitle = $('banner-title');
   const bannerSub = $('banner-sub');
@@ -33,6 +36,7 @@ export function createHud() {
   const buyMenu = $('buy-menu');
   const buyMoney = $('buy-money');
   const buyGrid = $('buy-grid');
+  const squadEl = $('buy-squad');
   const minimap = $('minimap');
   const mmCtx = minimap.getContext('2d');
   const vignette = $('vignette');
@@ -48,35 +52,46 @@ export function createHud() {
   let onPlay = null;
 
   // ---- buy menu rows ----
+  // Stat bars (DMG/RATE/AIM/MOVE) from the weapon defs, like the top entries'.
+  function statBars(def) {
+    const bar = (label, v) => `<span class="stat"><em>${label}</em><i><b style="width:${Math.round(Math.max(0, Math.min(1, v)) * 100)}%"></b></i></span>`;
+    return `<div class="buy-stats">${bar('DMG', (def.damage * (def.pellets ?? 1)) / 115)}${bar('RATE', (1 / def.fireGap) / 13.4)}${bar('AIM', (1 / def.spreadStill) / 2500)}${bar('MOVE', (def.moveSpeed - 0.85) / 0.25)}</div>`;
+  }
+  function buyRow(def, stats) {
+    const row = document.createElement('button');
+    row.className = 'buy-row';
+    row.type = 'button';
+    row.innerHTML = `<span class="buy-key"></span><div class="buy-body"><div class="buy-top"><span class="buy-name">${def.name}</span><span class="buy-price">$${def.price}</span></div><span class="buy-desc">${def.desc}</span>${stats ? statBars(def) : ''}</div>`;
+    row.addEventListener('click', () => onBuy && onBuy(def.id));
+    buyGrid.appendChild(row);
+    rows.push({ def, row });
+    return row;
+  }
   const rows = [];
-  for (const def of Object.values(WEAPONS)) {
-    const row = document.createElement('button');
-    row.className = 'buy-row';
-    row.type = 'button';
-    row.innerHTML = `<span class="buy-key"></span><span class="buy-name">${def.name}</span><span class="buy-desc">${def.desc}</span><span class="buy-price">$${def.price}</span>`;
-    row.addEventListener('click', () => onBuy && onBuy(def.id));
-    buyGrid.appendChild(row);
-    rows.push({ def, row });
-  }
-  const armorRow = document.createElement('button');
-  armorRow.className = 'buy-row';
-  armorRow.type = 'button';
-  armorRow.innerHTML = `<span class="buy-key"></span><span class="buy-name">KEVLAR VEST</span><span class="buy-desc">+${ARMOR_POINTS} armor. Absorbs half of every hit.</span><span class="buy-price">$${ARMOR_PRICE}</span>`;
-  armorRow.addEventListener('click', () => onBuy && onBuy('armor'));
-  buyGrid.appendChild(armorRow);
-  rows.push({ def: { id: 'armor', price: ARMOR_PRICE }, row: armorRow });
-  // grenades: HE + smoke, max 2 each, $300 apiece
+  for (const def of Object.values(WEAPONS)) buyRow(def, true);
+  buyRow({ id: 'armor', name: 'KEVLAR VEST', price: ARMOR_PRICE, desc: `+${ARMOR_POINTS} armor. Absorbs half of every hit.` });
+  buyRow({ id: 'helmet', name: 'HELMET', price: HELMET_PRICE, desc: 'Halves headshot damage. Your skull will thank you.' });
+  // grenades: HE + smoke + flash, max 2 each
   for (const def of Object.values(GRENADES)) {
-    const row = document.createElement('button');
-    row.className = 'buy-row';
-    row.type = 'button';
-    row.innerHTML = `<span class="buy-key"></span><span class="buy-name">${def.name}</span><span class="buy-desc">${def.desc} Max ${GRENADE_MAX}.</span><span class="buy-price">$${def.price}</span>`;
-    row.addEventListener('click', () => onBuy && onBuy(def.id));
-    buyGrid.appendChild(row);
-    rows.push({ def, row });
+    buyRow({ ...def, desc: `${def.desc} Max ${GRENADE_MAX}.` });
   }
-  const keyLabels = ['1', '2', '3', '4', '5', '6', '7', '8'];
+  const keyLabels = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '0'];
   rows.forEach((r, i) => { r.row.querySelector('.buy-key').textContent = keyLabels[i] || ''; });
+
+  function setOwned(id, owned) {
+    const r = rows.find((x) => x.def.id === id);
+    if (!r) return;
+    r.row.classList.toggle('owned', owned);
+    r.row.querySelector('.buy-price').textContent = owned ? 'OWNED' : `$${r.def.price}`;
+  }
+
+  function clearOwned() {
+    for (const r of rows) setOwned(r.def.id, false);
+  }
+
+  function setSquad(list) {
+    squadEl.innerHTML = `<span class="squad-title">SQUAD</span>` + list.map((s) => `<span><b>${s.name}</b> · ${s.role.toUpperCase()} · ${s.weapon}</span>`).join('');
+  }
 
   function setAmmo(mag, reserve, name) {
     const key = `${mag}/${reserve}/${name}`;
@@ -88,11 +103,12 @@ export function createHud() {
     ammoEl.classList.toggle('empty', mag === 0);
   }
 
-  function setHealth(hp, armor) {
+  function setHealth(hp, armor, helmet = false) {
     healthFill.style.width = `${Math.max(0, hp)}%`;
     healthNum.textContent = String(Math.max(0, Math.ceil(hp)));
     armorFill.style.width = `${Math.max(0, Math.min(100, armor))}%`;
     healthFill.classList.toggle('low', hp <= 30);
+    helmTag.classList.toggle('hidden', !helmet);
   }
 
   function setMoney(value) {
@@ -130,13 +146,16 @@ export function createHud() {
     crosshair.style.setProperty('--gap', `${spreadPx}px`);
   }
 
-  function setGrenades(he, smoke, selected) {
+  function setGrenades(he, smoke, flash, selected) {
     grenHe.textContent = `HE ×${he}`;
     grenSmoke.textContent = `SMOKE ×${smoke}`;
+    grenFlash.textContent = `FLASH ×${flash}`;
     grenHe.classList.toggle('sel', selected === 'he');
     grenSmoke.classList.toggle('sel', selected === 'smoke');
+    grenFlash.classList.toggle('sel', selected === 'flash');
     grenHe.classList.toggle('empty', he === 0);
     grenSmoke.classList.toggle('empty', smoke === 0);
+    grenFlash.classList.toggle('empty', flash === 0);
   }
 
   function damageFlash() {
@@ -152,6 +171,24 @@ export function createHud() {
     killfeed.prepend(line);
     while (killfeed.children.length > 5) killfeed.removeChild(killfeed.lastChild);
     setTimeout(() => line.classList.add('fade'), 4200);
+  }
+
+  // Squad radio: teammate callouts, newest first, max 3 lines, fading.
+  function radio(name, text, team) {
+    const line = document.createElement('div');
+    line.className = 'radio-line';
+    line.innerHTML = `<span class="${team === 'attack' ? 'atk' : 'def'}">${name}</span> ${text}`;
+    radioFeed.prepend(line);
+    while (radioFeed.children.length > 3) radioFeed.removeChild(radioFeed.lastChild);
+    setTimeout(() => line.classList.add('fade'), 12000);
+    setTimeout(() => line.remove(), 14000);
+  }
+
+  function flashPop() {
+    const f = $('flash');
+    f.classList.remove('on');
+    void f.offsetWidth;
+    f.classList.add('on');
   }
 
   function showBanner(title, sub, ms = 2600) {
@@ -204,10 +241,11 @@ export function createHud() {
     overlay.hidden = true;
   }
 
-  function openBuy(money) {
+  function openBuy(money, squad) {
     buyOpen = true;
     buyMenu.classList.remove('hidden');
     buyMoney.textContent = `$${money.toLocaleString('en-US')}`;
+    if (squad) setSquad(squad);
   }
 
   function closeBuy() {
@@ -271,7 +309,8 @@ export function createHud() {
 
   return {
     setAmmo, setHealth, setMoney, setScore, setTimer, setAlive,
-    hitMarker, setCrosshairSpread, setGrenades, damageFlash, feed,
+    hitMarker, setCrosshairSpread, setGrenades, damageFlash, feed, radio, flashPop,
+    setOwned, clearOwned,
     showBanner, hideBanner, setChannel, setPrompt,
     showOverlay, hideOverlay, onPlay: (fn) => { onPlay = fn; },
     openBuy, closeBuy, isBuyOpen, onBuy: (fn) => { onBuy = fn; },

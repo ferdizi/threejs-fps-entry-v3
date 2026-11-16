@@ -1,11 +1,10 @@
 // TIDEWATER — round-based tactical FPS. Main loop, rounds, economy, shooting,
-// plant/defuse, and the deterministic ?shot= frames for screenshots.
 import * as THREE from 'three';
 import { PALETTE } from './palette.js';
 import { createWorld } from './world.js';
 import { createInput } from './input.js';
 import { createPlayer } from './player.js';
-import { createWeapon, WEAPONS, ARMOR_PRICE, ARMOR_POINTS } from './weapon.js';
+import { createWeapon, WEAPONS, ARMOR_PRICE, ARMOR_POINTS, HELMET_PRICE } from './weapon.js';
 import { createGrenades, GRENADES, GRENADE_MAX } from './grenade.js';
 import { createBots } from './bots.js';
 import { createEffects } from './effects.js';
@@ -83,6 +82,7 @@ const grenades = createGrenades(scene, world, {
   damageRadius,
   effects,
   audio,
+  onFlash: (pos) => flashPop(pos),
 });
 
 const raycaster = new THREE.Raycaster();
@@ -109,6 +109,7 @@ const match = {
 const you = {
   health: 100,
   armor: 0,
+  helmet: false,
   money: 800,
   alive: true,
   primary: 'rifle',
@@ -117,8 +118,8 @@ const you = {
   planting: false,
   stepAt: 0,
   firedAt: 0,
-  grenades: { he: 0, smoke: 0 },
-  selectedGrenade: null, // 'he' | 'smoke' | null (null = gun selected)
+  grenades: { he: 0, smoke: 0, flash: 0 },
+  selectedGrenade: null, // 'he' | 'smoke' | 'flash' | null (null = gun selected)
   throwAt: -10,
 };
 
@@ -143,6 +144,7 @@ const bots = createBots(scene, world, {
   shoot: (origin, dir, def, shooter) => shoot(origin, dir, def, shooter),
   smokeBlocked: (from, to) => grenades.segmentBlockedBySmoke(from, to),
   throwGrenade: (kind, origin, target, bot) => grenades.throwArc(kind, origin, target, bot.team, bot.name),
+  radio: (name, text, team) => radio(name, text, team),
   channelProgress: (bot, channel, progress) => {
     if (channel) botChannels.set(bot, { ...channel, progress });
     else botChannels.delete(bot);
@@ -161,6 +163,8 @@ const bots = createBots(scene, world, {
       const next = bots.bots.find((b) => b.alive && b.team === 'attack' && !b.isCarrier);
       if (next) {
         next.isCarrier = true;
+        hud.showBanner('CHARGE DROPPED', `${bot.name} is down — ${next.name} has the charge`, 3000);
+        radio(next.name, 'I have the charge', 'attack');
         const charge = new THREE.Mesh(
           new THREE.BoxGeometry(0.34, 0.26, 0.16),
           new THREE.MeshStandardMaterial({ color: new THREE.Color(PALETTE.accent), emissive: new THREE.Color(PALETTE.accent), emissiveIntensity: 0.7 }),
@@ -172,6 +176,43 @@ const bots = createBots(scene, world, {
     checkRoundEnd();
   },
 });
+
+// ---- squad radio: at most one line per second, so the feed never floods ----
+let lastRadioAt = -10;
+function radio(name, text, team) {
+  if (elapsed - lastRadioAt < 1.0) return;
+  lastRadioAt = elapsed;
+  hud.radio(name, text, team);
+}
+function areaName(x, z) {
+  if (Math.hypot(x - world.sites.A.x, z - world.sites.A.z) < 9) return 'Site A';
+  if (Math.hypot(x - world.sites.B.x, z - world.sites.B.z) < 9) return 'Site B';
+  return 'Mid';
+}
+function squadList() {
+  return bots.bots.filter((b) => b.team === 'attack').map((b) => ({ name: b.name, role: b.role, weapon: b.weapon.name }));
+}
+// ---- flash pop: blinds the player when facing it, blinds nearby bots for 3 s ----
+function flashPop(pos) {
+  if (you.alive) {
+    const dir = new THREE.Vector3(
+      -Math.sin(player.state.yaw) * Math.cos(player.state.pitch),
+      Math.sin(player.state.pitch),
+      -Math.cos(player.state.yaw) * Math.cos(player.state.pitch),
+    );
+    const to = new THREE.Vector3(
+      pos.x - player.state.position.x,
+      pos.y - (player.state.position.y + player.state.eye),
+      pos.z - player.state.position.z,
+    );
+    if (to.length() < 30 && to.normalize().dot(dir) > 0.35) hud.flashPop();
+  }
+  for (const b of bots.bots) {
+    if (!b.alive) continue;
+    const bp = b.mover.state.position;
+    if (Math.hypot(bp.x - pos.x, bp.z - pos.z) < 18) b.blindedUntil = elapsed + 3;
+  }
+}
 
 // ---- shooting: one hitscan path for the player and every bot ----
 function shoot(origin, dir, def, shooter) {
@@ -192,7 +233,6 @@ function shoot(origin, dir, def, shooter) {
     const targets = world.shootables.concat(bots.hitMeshes());
     const hits = raycaster.intersectObjects(targets, false);
     // first hit that is not a same-team bot (no friendly fire: a teammate in the
-    // line of fire is shot through, the ray continues to what is behind them)
     let hit = null;
     for (const h of hits) {
       const hb = h.object.userData.bot;
@@ -218,7 +258,9 @@ function shoot(origin, dir, def, shooter) {
     const muzzle = origin.clone();
     if (playerHit) {
       const falloff = playerHit.distance > def.range * 0.6 ? 0.65 : 1;
-      const dmg = def.damage * (playerHit.head ? def.headMult : 1) * falloff;
+      // a helmet halves headshot damage
+      const headMult = playerHit.head ? (you.helmet ? def.headMult * 0.5 : def.headMult) : 1;
+      const dmg = def.damage * headMult * falloff;
       hurtPlayer(dmg, shooter?.name ?? 'BOT');
       effects.tracer(muzzle, playerHit.point);
       anyHit = true;
@@ -252,7 +294,6 @@ function shoot(origin, dir, def, shooter) {
     }
   }
   // every shot is audible: the nearest defender without a target re-paths
-  // toward the gunfire (2 s per-bot cooldown inside heardShot)
   bots.heardShot(origin, shooterTeam);
   return anyHit;
 }
@@ -290,6 +331,9 @@ function plantCharge(site, byName) {
   if (byName === 'YOU') {
     you.money += 300;
     hud.setMoney(you.money);
+    radio('YOU', `Planting ${site} — cover me`, 'attack');
+  } else {
+    radio(byName, `Planting ${site}, cover me`, 'attack');
   }
 }
 
@@ -344,16 +388,17 @@ function startRound() {
   else weapon.equip(you.primary, true);
   weapon.refill();
   // bots were already placed by startBuyPhase and held through buy time —
-  // do NOT reset them here, or the buy phase would be a wasted warmup
   hud.hideOverlay();
   hud.setHealth(you.health, you.armor);
   hud.setAmmo(weapon.state.mag, weapon.state.reserve, weapon.def.name);
   hud.setMoney(you.money);
-  hud.setGrenades(you.grenades.he, you.grenades.smoke, you.selectedGrenade);
+  hud.setGrenades(you.grenades.he, you.grenades.smoke, you.grenades.flash, you.selectedGrenade);
   hud.setScore(match.atkWins, match.defWins, match.round);
   hud.setTimer(ROUND_SECONDS, false);
   hud.setAlive(bots.aliveCount('attack') + 1, bots.aliveCount('defend'));
   hud.showBanner(`ROUND ${match.round}`, 'Plant the charge at Site A or B — or eliminate the Harbor Watch', 2600);
+  const carrier = bots.bots.find((b) => b.isCarrier && b.team === 'attack' && b.alive);
+  if (carrier) radio(carrier.name, carrier.site === 'A' ? 'Pushing A — west catwalk' : 'Pushing B — east lane', 'attack');
   input.requestLock();
 }
 
@@ -370,6 +415,7 @@ function startBuyPhase() {
   you.health = 100;
   you.alive = true;
   you.armor = 0;
+  you.helmet = false;
   you.plantProgress = 0;
   you.planting = false;
   if (!you.hasPrimary) weapon.equip('pistol');
@@ -377,14 +423,15 @@ function startBuyPhase() {
   weapon.refill();
   bots.reset(match.round);
   grenades.clear(); // no live grenades or smoke carry into a new round
-  hud.setHealth(you.health, you.armor);
+  hud.clearOwned();
+  hud.setHealth(you.health, you.armor, you.helmet);
   hud.setAmmo(weapon.state.mag, weapon.state.reserve, weapon.def.name);
   hud.setMoney(you.money);
-  hud.setGrenades(you.grenades.he, you.grenades.smoke, you.selectedGrenade);
+  hud.setGrenades(you.grenades.he, you.grenades.smoke, you.grenades.flash, you.selectedGrenade);
   hud.setScore(match.atkWins, match.defWins, match.round);
   hud.setTimer(BUY_SECONDS, false);
   hud.setAlive(bots.aliveCount('attack') + 1, bots.aliveCount('defend'));
-  hud.openBuy(you.money);
+  hud.openBuy(you.money, squadList());
   hud.setPrompt('B — buy menu · ENTER — deploy');
   if (document.pointerLockElement) document.exitPointerLock();
 }
@@ -406,7 +453,8 @@ function resetMatch() {
   you.primary = 'rifle';
   you.hasPrimary = true;
   you.armor = 0;
-  you.grenades = { he: 0, smoke: 0 };
+  you.helmet = false;
+  you.grenades = { he: 0, smoke: 0, flash: 0 };
   you.selectedGrenade = null;
   grenades.clear();
   startBuyPhase();
@@ -415,7 +463,7 @@ function resetMatch() {
 // ---- buy handling ----
 function buy(id) {
   if (match.phase !== 'buy') return;
-  if (id === 'he' || id === 'smoke') {
+  if (id === 'he' || id === 'smoke' || id === 'flash') {
     if (you.grenades[id] >= GRENADE_MAX || you.money < GRENADES[id].price) return;
     you.money -= GRENADES[id].price;
     you.grenades[id] += 1;
@@ -424,6 +472,14 @@ function buy(id) {
     if (you.armor >= ARMOR_POINTS || you.money < ARMOR_PRICE) return;
     you.money -= ARMOR_PRICE;
     you.armor = ARMOR_POINTS;
+    hud.setOwned('armor', true);
+    audio.buy();
+  } else if (id === 'helmet') {
+    if (you.helmet || you.money < HELMET_PRICE) return;
+    you.money -= HELMET_PRICE;
+    you.helmet = true;
+    hud.setOwned('helmet', true);
+    hud.setHealth(you.health, you.armor, you.helmet);
     audio.buy();
   } else {
     const def = WEAPONS[id];
@@ -443,7 +499,7 @@ function buy(id) {
   }
   hud.setMoney(you.money);
   hud.setAmmo(weapon.state.mag, weapon.state.reserve, weapon.def.name);
-  hud.setGrenades(you.grenades.he, you.grenades.smoke, you.selectedGrenade);
+  hud.setGrenades(you.grenades.he, you.grenades.smoke, you.grenades.flash, you.selectedGrenade);
   hud.openBuy(you.money);
 }
 
@@ -509,9 +565,11 @@ function throwPlayerGrenade() {
   you.grenades[kind] -= 1;
   you.throwAt = elapsed;
   if (you.grenades[kind] === 0) you.selectedGrenade = null;
+  if (kind === 'smoke') radio('YOU', `Smoking ${areaName(body.position.x, body.position.z)}`, 'attack');
+  else if (kind === 'flash') radio('YOU', 'Flash out', 'attack');
   audio.throwWhoosh();
   effects.dust(origin);
-  hud.setGrenades(you.grenades.he, you.grenades.smoke, you.selectedGrenade);
+  hud.setGrenades(you.grenades.he, you.grenades.smoke, you.grenades.flash, you.selectedGrenade);
 }
 
 function playerShoot() {
@@ -598,7 +656,6 @@ function step(dt) {
   weapon.step(dt);
 
   // bots hold at spawn during the buy phase (freeze time) — they only play
-  // once the round is live, so nothing they do in buy gets wiped by a reset
   if (match.phase === 'live') bots.step(dt);
   effects.step(dt);
   grenades.step(dt);
@@ -674,24 +731,28 @@ function frame(now) {
     if (input.state.keys.has('Digit1') && you.alive && match.phase === 'live') {
       weapon.equip('pistol');
       you.selectedGrenade = null;
-      hud.setGrenades(you.grenades.he, you.grenades.smoke, you.selectedGrenade);
+      hud.setGrenades(you.grenades.he, you.grenades.smoke, you.grenades.flash, you.selectedGrenade);
     }
     if (input.state.keys.has('Digit2') && you.alive && match.phase === 'live' && you.hasPrimary) {
       weapon.equip(you.primary);
       you.selectedGrenade = null;
-      hud.setGrenades(you.grenades.he, you.grenades.smoke, you.selectedGrenade);
+      hud.setGrenades(you.grenades.he, you.grenades.smoke, you.grenades.flash, you.selectedGrenade);
     }
     if (input.state.keys.has('Digit4') && you.alive && match.phase === 'live' && you.grenades.he > 0) {
       you.selectedGrenade = 'he';
-      hud.setGrenades(you.grenades.he, you.grenades.smoke, you.selectedGrenade);
+      hud.setGrenades(you.grenades.he, you.grenades.smoke, you.grenades.flash, you.selectedGrenade);
     }
     if (input.state.keys.has('Digit5') && you.alive && match.phase === 'live' && you.grenades.smoke > 0) {
       you.selectedGrenade = 'smoke';
-      hud.setGrenades(you.grenades.he, you.grenades.smoke, you.selectedGrenade);
+      hud.setGrenades(you.grenades.he, you.grenades.smoke, you.grenades.flash, you.selectedGrenade);
+    }
+    if (input.state.keys.has('Digit6') && you.alive && match.phase === 'live' && you.grenades.flash > 0) {
+      you.selectedGrenade = 'flash';
+      hud.setGrenades(you.grenades.he, you.grenades.smoke, you.grenades.flash, you.selectedGrenade);
     }
     if (input.state.keys.has('KeyB') && match.phase === 'buy') {
       if (hud.isBuyOpen()) { hud.closeBuy(); hud.setPrompt(''); }
-      else hud.openBuy(you.money);
+      else hud.openBuy(you.money, squadList());
     }
     if (input.state.keys.has('Enter') && match.phase === 'buy') {
       hud.closeBuy();
@@ -743,7 +804,7 @@ function runShot(name) {
     player.state.yaw = 0;
     player.state.pitch = 0;
     settle(30);
-    hud.openBuy(you.money);
+    hud.openBuy(you.money, squadList());
     hud.setMoney(you.money);
     hud.setScore(0, 0, 1);
     hud.setTimer(BUY_SECONDS - 2, false);
@@ -796,9 +857,10 @@ function runShot(name) {
     hud.setTimer(83, false);
     hud.setAlive(5, 4);
     hud.hitMarker(false);
+    hud.radio('MARA', 'Contact Mid — two pushing', 'attack');
+    hud.radio('SABLE', 'Heard a shot, Mid', 'defend');
   } else if (name === 'smoke') {
     // grenade frame: a smoke screen blooming at the warehouse entrance (site B),
-    // a defender caught beside it, the new grenade slots visible in the HUD
     match.phase = 'live';
     match.phaseT = 25;
     match.round = 2;
@@ -807,7 +869,7 @@ function runShot(name) {
     player.state.yaw = -0.66; // facing site B / the warehouse
     player.state.pitch = 0.01;
     settle(20);
-    you.grenades = { he: 1, smoke: 1 };
+    you.grenades = { he: 1, smoke: 1, flash: 0 };
     you.selectedGrenade = 'smoke';
     const eye = new THREE.Vector3(4, 1.6, 2);
     grenades.throwArc('smoke', eye, new THREE.Vector3(14, 1, -6.5), 'attack', 'YOU');
@@ -834,11 +896,9 @@ function runShot(name) {
     hud.setScore(1, 0, 2);
     hud.setTimer(75, false);
     hud.setAlive(5, 5);
-    hud.setGrenades(1, 0, null);
+    hud.setGrenades(1, 0, 0, null);
   } else if (name === 'catwalk') {
     // v3 multi-level frame: the player stands on the west catwalk (2.6 m up)
-    // looking down the deck toward site A, flanker VESK ahead on the deck,
-    // DARA holding the site below, MARA on the platform behind
     match.phase = 'live';
     match.phaseT = 31;
     match.round = 2;
@@ -883,9 +943,9 @@ function runShot(name) {
     hud.setTimer(69, false);
     hud.setAlive(5, 5);
     hud.hitMarker(false);
+    hud.radio('VESK', 'Flanking B — catwalk clear', 'attack');
   } else if (name === 'retake') {
     // v3 retake frame: charge planted at B, lead retaker RUE pushing the front
-    // while flank retaker FINN drops from the east catwalk, smoke screening the site
     match.phase = 'live';
     match.phaseT = 40;
     match.round = 3;
@@ -898,7 +958,7 @@ function runShot(name) {
     player.state.yaw = -0.5;
     player.state.pitch = 0.02;
     settle(20);
-    you.grenades = { he: 0, smoke: 1 };
+    you.grenades = { he: 0, smoke: 1, flash: 0 };
     const eye = new THREE.Vector3(8, 1.6, -1);
     grenades.throwArc('smoke', eye, new THREE.Vector3(14, 1, -11), 'defend', 'RUE');
     you.grenades.smoke = 0;
@@ -931,6 +991,9 @@ function runShot(name) {
     hud.setTimer(25, true);
     hud.setAlive(4, 4);
     hud.showBanner('CHARGE PLANTED', 'RUE is retaking SITE B — WALL OF SMOKE', 60000);
+    hud.setGrenades(0, 0, 0, null);
+    hud.radio('RUE', 'Retaking B — smoke out', 'defend');
+    hud.radio('FINN', 'Flanking from the east catwalk', 'defend');
   } else {
     // round won: charge detonated at A, banner up, score 2-1
     match.phase = 'roundEnd';
@@ -968,12 +1031,16 @@ function resetMatchStateForShot() {
   you.primary = 'rifle';
   you.hasPrimary = true;
   you.armor = 0;
+  you.helmet = false;
   you.health = 100;
   you.alive = true;
+  you.grenades = { he: 0, smoke: 0, flash: 0 };
+  you.selectedGrenade = null;
   weapon.equip('rifle');
   weapon.refill();
   bots.reset(1);
   grenades.clear();
+  hud.clearOwned();
   hud.setMoney(you.money);
 }
 
@@ -992,7 +1059,7 @@ hud.setMoney(800);
 hud.setScore(0, 0, 1);
 hud.setTimer(BUY_SECONDS, false);
 hud.setAlive(5, 5);
-hud.setGrenades(0, 0, null);
+hud.setGrenades(0, 0, 0, null);
 syncCamera();
 if (shot) runShot(shot);
 else {

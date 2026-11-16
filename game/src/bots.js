@@ -1,13 +1,4 @@
 // Bots: two squads of five, with roles. Attackers push a site and plant the pulse
-// charge; defenders hold the sites and defuse. v3 AI: every bot has a role (carrier,
-// entry, flanker, support / anchor, mid, retaker) instead of all bots running the
-// same push logic. Anchors hold angles at site entrances and only leave them on a
-// target, a sound, or a plant. Retakes are coordinated: the lead pushes the site
-// directly while the flank retaker comes around the far catwalk 1.5 s later, and one
-// of them smokes the site to cover the defuse. Bots react to sound, not just sight:
-// gunshots (both teams), footsteps within 12 m, and explosions within 26 m all pull
-// the nearest idle bots toward the noise. Utility is tactical: smoke on the site
-// push, HE at a planted charge or a held defender, smoke to cover a defuse.
 import * as THREE from 'three';
 import { createMover } from './player.js';
 import { WEAPONS } from './weapon.js';
@@ -108,7 +99,7 @@ export function createBots(scene, world, api) {
       grenades: { he: 0, smoke: 0 },
       flank: role === 'flanker',
       flankStage: 0,
-      heardAt: -10, heardStepAt: -10,
+      heardAt: -10, heardStepAt: -10, radioAt: -99, hadTarget: false, blindedUntil: 0,
       hold: null, // { x, z, yaw } — an angle this bot holds while idle
       holdPhase: api.random() * Math.PI * 2,
       retakeRole: null, // 'lead' | 'flank' — only while a charge is planted
@@ -119,8 +110,6 @@ export function createBots(scene, world, api) {
       strafeSeed: api.random() * Math.PI * 2,
       hitMeshes: [torso, head],
       // stuck-breaker state: last position while pathing + when it was set.
-      // excludeNode is a waypoint id the bot proved unreachable (see setPath);
-      // it is forgotten 8 s after it was set (excludeUntil).
       lastX: spawn[0], lastZ: spawn[1], lastMoveT: 0,
       excludeNode: null, excludeUntil: 0,
     };
@@ -161,22 +150,11 @@ export function createBots(scene, world, api) {
     const onno = bots.find((b) => b.name === 'ONNO');
     if (onno) onno.hold = holdAngle(11, -13.5, 14, -6);
     // retakers stage at their sites until a plant calls them in. (Was
-    // mid-north holds at (-4,-9)/(4,-9) facing (0,-2): RUE, FINN and SABLE
-    // then all covered the same mid-north funnel and the carrier died there
-    // every round — min dist to site 14.2 m, deaths at (0,-1) and (-3,-2).
-    // Defenders hold their sites; the mid funnel is SABLE's job alone.
-    // FINN's hold was (10,-12), the first thing the B push meets — it died
-    // at 7 s every round, before any plant, so the flank retake never ran.
-    // It holds deep at the back of the warehouse (13,-14.5), behind the
-    // site. (Tried holding with ONNO at (11,-14.5): FINN still died and
-    // the two-deep B defense shut the attack out 0-5 with 0 plants, so
-    // that was reverted.)
     const rue = bots.find((b) => b.name === 'RUE');
     if (rue) { rue.retakeRole = 'lead'; rue.hold = holdAngle(-10, -11, -4, -6); }
     const finn = bots.find((b) => b.name === 'FINN');
     if (finn) { finn.retakeRole = 'flank'; finn.hold = holdAngle(13, -14.5, 14, -6); }
     // utility loadout: smoke for the pushes and the retake cover, HE for plants
-    // and for flushing a defender holding an angle.
     const byName = (n) => bots.find((b) => b.name === n);
     if (byName('KIP')) byName('KIP').grenades.smoke = 1;
     if (byName('MARA')) byName('MARA').grenades.smoke = 1;
@@ -192,6 +170,18 @@ export function createBots(scene, world, api) {
     return tmpEye;
   }
 
+  // Squad radio: one callout per bot per 8 s, via the main agent (throttled there).
+  function areaName(x, z) {
+    if (Math.hypot(x - world.sites.A.x, z - world.sites.A.z) < 9) return 'Site A';
+    if (Math.hypot(x - world.sites.B.x, z - world.sites.B.z) < 9) return 'Site B';
+    return 'Mid';
+  }
+  function say(bot, text) {
+    if (!api.radio || api.time() - bot.radioAt < 8) return;
+    bot.radioAt = api.time();
+    api.radio(bot.name, text, bot.team);
+  }
+
   function los(fromPos, toPos, maxDist) {
     tmpDir.copy(toPos).sub(fromPos);
     const dist = tmpDir.length();
@@ -202,16 +192,12 @@ export function createBots(scene, world, api) {
     const hits = raycaster.intersectObjects(world.shootables, false);
     if (hits.length > 0) return false;
     // smoke blocks bot sight: a line of sight through an active smoke cloud
-    // does not count (the player's hitscan still passes through smoke)
     if (api.smokeBlocked && api.smokeBlocked(fromPos, toPos)) return false;
     return true;
   }
 
   // Sound: gunshots pull the two nearest idle enemies toward the noise (either
-  // team hears the other), footsteps pull the nearest one within 12 m, and an
-  // explosion pulls idle bots within 26 m. Anchors on a hold angle only break
-  // their hold for a sound if they are the nearest responder — the rest stay put.
-  function investigate(pos, listenTeam, radius, maxResponders, cooldownKey, cooldown) {
+  function investigate(pos, listenTeam, radius, maxResponders, cooldownKey, cooldown, kind) {
     const responders = [];
     for (const bot of bots) {
       if (!bot.alive || bot.team !== listenTeam || bot.target || bot.channel) continue;
@@ -230,19 +216,23 @@ export function createBots(scene, world, api) {
       bot[cooldownKey] = api.time();
       setPath(bot, pos.x, pos.z);
     }
+    if (chosen.length && kind) {
+      const label = kind === 'shot' ? 'Heard a shot' : kind === 'explosion' ? 'Heard an explosion' : 'Heard steps';
+      say(chosen[0].bot, `${label}, ${areaName(pos.x, pos.z)}`);
+    }
     return chosen.length;
   }
 
   function heardShot(pos, shooterTeam) {
-    investigate(pos, shooterTeam === 'attack' ? 'defend' : 'attack', 22, 2, 'heardAt', 2);
+    investigate(pos, shooterTeam === 'attack' ? 'defend' : 'attack', 22, 2, 'heardAt', 2, 'shot');
   }
 
   function heardStep(pos, stepperTeam) {
-    investigate(pos, stepperTeam === 'attack' ? 'defend' : 'attack', 12, 1, 'heardStepAt', 3);
+    investigate(pos, stepperTeam === 'attack' ? 'defend' : 'attack', 12, 1, 'heardStepAt', 3, 'step');
   }
 
   function heardExplosion(pos, throwerTeam) {
-    investigate(pos, throwerTeam === 'attack' ? 'defend' : 'attack', 26, 2, 'heardAt', 2);
+    investigate(pos, throwerTeam === 'attack' ? 'defend' : 'attack', 26, 2, 'heardAt', 2, 'explosion');
   }
 
   function visibleEnemies(bot) {
@@ -264,10 +254,6 @@ export function createBots(scene, world, api) {
   }
 
   // Path through `via` waypoint ids in order, then to (tx, tz). Used for the
-  // catwalk flanks and the retake flank: BFS leg by leg, duplicates dropped.
-  // `bot.excludeNode` is a waypoint id the bot proved it cannot reach (its
-  // straight line is blocked — e.g. a node inside the warehouse seen from
-  // outside its back wall); both ends of the path are computed without it.
   function setPath(bot, tx, tz, viaIds = null) {
     const p = bot.mover.state.position;
     const ex = bot.excludeNode ?? -1;
@@ -293,7 +279,6 @@ export function createBots(scene, world, api) {
   }
 
   // The far catwalk for a site: to flank A, cross on the east catwalk and come
-  // back through north-mid; to flank B, cross on the west catwalk.
   function farRouteFor(site) {
     return site === 'A' ? EAST_ROUTE : WEST_ROUTE;
   }
@@ -317,13 +302,10 @@ export function createBots(scene, world, api) {
       const planted = api.plantedSite();
       let enemies = visibleEnemies(bot);
       // A flanker en route ignores distant targets: stopping to duel a
-      // defender holding an angle from the exposed stairs is a losing fight
-      // (VESK stalled at y=1.95 on the east stairs every round once the
-      // defenders stopped chasing sounds and held their angles). Inside
-      // 8 m it still fights. Once it reaches the landing (flankStage 1)
-      // it fights normally — from behind the site holders.
       if (bot.flank && bot.flankStage === 0) enemies = enemies.filter((e) => e.dist <= 8);
       bot.target = enemies.length ? enemies[0] : null;
+      if (bot.target && !bot.hadTarget) say(bot, `Contact ${areaName(pos.x, pos.z)}`);
+      bot.hadTarget = !!bot.target;
       if (!planted) {
         bot.retakeAt = 0;
         bot.retakeSmoked = false;
@@ -334,6 +316,7 @@ export function createBots(scene, world, api) {
         if (Math.hypot(pos.x - land.x, pos.z - land.z) < 2) {
           bot.flankStage = 1;
           bot.path = [];
+          say(bot, `In position — flanking ${bot.site}`);
         }
       }
       if (bot.channel) {
@@ -342,15 +325,6 @@ export function createBots(scene, world, api) {
       }
       if (!bot.channel) {
         // --- utility: smoke the push, HE the plant or a held defender ---
-        // Smoke fires even while the bot has a target: the push IS the fight,
-        // and gating smoke on "no target" meant the carrier's smoke never
-        // fired once the defenders actually contested the approach (0 smokes
-        // in the first post-fix match sims). Each bot carries 1 smoke, so
-        // this can fire at most once per bot per round. It fires from up to
-        // 22 m out, aimed 7 m ahead of the bot toward its site, so the cloud
-        // screens the ground the push is about to walk through — aiming it
-        // halfway to the site instead screened the far approach while the
-        // carrier died in mid (min dist to site 12.4 m, deaths at (8,6.8)).
         if (bot.grenades.smoke > 0 && bot.team === 'attack' && !planted) {
           const site = world.sites[bot.site];
           const dx = site.x - pos.x;
@@ -361,6 +335,7 @@ export function createBots(scene, world, api) {
             const tz = pos.z + (dz / d) * 7;
             api.throwGrenade('smoke', eyeOf(bot).clone(), new THREE.Vector3(tx, 1, tz), bot);
             bot.grenades.smoke -= 1;
+            say(bot, `Smoking ${bot.site === 'A' ? 'Site A' : 'Site B'}`);
           }
         }
         if (bot.grenades.he > 0 && bot.team === 'defend' && planted) {
@@ -368,10 +343,12 @@ export function createBots(scene, world, api) {
           if (Math.hypot(pos.x - site.x, pos.z - site.z) < 18) {
             api.throwGrenade('he', eyeOf(bot).clone(), new THREE.Vector3(site.x, 1, site.z), bot);
             bot.grenades.he -= 1;
+            say(bot, 'HE on the plant');
           }
         } else if (bot.grenades.he > 0 && bot.target && bot.target.dist > 10 && bot.target.dist < 20 && api.random() < 0.25) {
           api.throwGrenade('he', eyeOf(bot).clone(), new THREE.Vector3(bot.target.pos.x, 1, bot.target.pos.z), bot);
           bot.grenades.he -= 1;
+          say(bot, 'HE out');
         }
         // retake smoke: the flank retaker screens the site before defusing
         if (planted && bot.team === 'defend' && bot.retakeRole === 'flank' && bot.grenades.smoke > 0 && !bot.retakeSmoked) {
@@ -380,14 +357,10 @@ export function createBots(scene, world, api) {
             api.throwGrenade('smoke', eyeOf(bot).clone(), new THREE.Vector3(site.x, 1, site.z), bot);
             bot.grenades.smoke -= 1;
             bot.retakeSmoked = true;
+            say(bot, 'Smoking the site');
           }
         }
         // --- hearing footsteps: a fast enemy nearby gives itself away ---
-        // Holders and the retake reserve do NOT chase footsteps: RUE kept
-        // leaving its site hold to chase attackers pushing A and died in
-        // mid-east (9.4,-5) before any plant, so there was no retaker left
-        // when the charge went down. The mid patrol and the attackers still
-        // investigate; the holders stay on their angles.
         if (!bot.target && !bot.hold && !bot.retakeRole) {
           const hearR = 9;
           let heard = null;
@@ -421,10 +394,12 @@ export function createBots(scene, world, api) {
               } else if (d < 2.2) {
                 bot.channel = { kind: 'defuse', site: planted, progress: 0 };
                 bot.path = [];
+                say(bot, 'Defusing — cover me');
               } else if (!bot.path.length) setPath(bot, site.x, site.z, farRouteFor(planted));
             } else if (d < 2.2) {
               bot.channel = { kind: 'defuse', site: planted, progress: 0 };
               bot.path = [];
+              say(bot, 'Defusing — cover me');
             } else if (!bot.path.length) setPath(bot, site.x, site.z);
           } else if (!bot.path.length && !bot.target) {
             // attackers hold the planted site: spread around it, face the approach
@@ -434,15 +409,6 @@ export function createBots(scene, world, api) {
           }
         } else if (bot.team === 'attack' && bot.isCarrier) {
           // The carrier trails the entry fragger by 2.5 s and pushes on the
-          // ground route: every alternative lost the carrier — leading the
-          // mid push died in mid (min dist 18.4 m), the catwalk route died
-          // on the exposed stairs ((-4.7,5.2), (-6.5,3.8)), and ignoring
-          // targets either way just let defenders shoot it for free. With
-          // the stagger the carrier survives every round and reaches 8 m
-          // from the site; the round then usually ends by elimination
-          // before it plants (see NOTE.md — the plant loop needs an escort,
-          // which is the human player's job in real play, and the retake
-          // machinery is validated by the forced-plant sim).
           if (bot.pushAt === 0) bot.pushAt = api.time() + 2.5;
           const site = world.sites[bot.site];
           const d = Math.hypot(pos.x - site.x, pos.z - site.z);
@@ -451,6 +417,7 @@ export function createBots(scene, world, api) {
           } else if (d < 2.4 && !bot.target) {
             bot.channel = { kind: 'plant', site: bot.site, progress: 0 };
             bot.path = [];
+            say(bot, `Planting ${bot.site}, cover me`);
           } else if (!bot.path.length && !bot.target) setPath(bot, site.x, site.z);
         } else if (bot.team === 'attack' && bot.role === 'flanker' && bot.flankStage === 0) {
           if (!bot.path.length && !bot.target) {
@@ -463,10 +430,6 @@ export function createBots(scene, world, api) {
             setPath(bot, bot.hold.x, bot.hold.z);
           } else if (bot.team === 'defend' && bot.role === 'mid') {
             // mid patrol: drift between mid-north waypoints, pausing at each.
-            // (Was 6<->11; waypoint 6 is where the attack push arrives first,
-            // so SABLE met the carrier head-on there and killed it in mid
-            // every round. Patrolling 11<->19 lets the push reach mid-north
-            // before first contact, with the entry fragger in front.)
             if (!bot.patrolGoal || api.time() > bot.patrolAt) {
               bot.patrolGoal = bot.patrolGoal === 11 ? 19 : 11;
               bot.patrolAt = api.time() + 8;
@@ -515,7 +478,7 @@ export function createBots(scene, world, api) {
         bot.burstLeft = 3 + Math.floor(api.random() * 3);
         bot.burstAt = 0.6 + api.random() * 0.6;
       }
-      if (bot.burstLeft > 0 && bot.burstAt <= 0) {
+      if (bot.burstLeft > 0 && bot.burstAt <= 0 && api.time() >= bot.blindedUntil) {
         bot.burstLeft -= 1;
         bot.burstAt = bot.weapon.fireGap * 1.15;
         const shotEye = eyeOf(bot).clone();
@@ -561,7 +524,6 @@ export function createBots(scene, world, api) {
     }
 
     // --- navigate along the path (an exhausted path clears, so the think
-    // layer can issue the next order: patrol legs, hold angles, re-paths) ---
     if (bot.path.length && bot.pathIndex >= bot.path.length) bot.path.length = 0;
     if (bot.path.length && bot.pathIndex < bot.path.length) {
       const wp = bot.path[bot.pathIndex];
@@ -583,10 +545,6 @@ export function createBots(scene, world, api) {
         bot.walkPhase += dt * 9;
       }
       // --- stuck-breaker: a bot that has a path but has not moved for 2.5 s
-      // is pushing a wall/container whose far side holds its next waypoint
-      // (the waypoint graph is distance-based, walls are not). Drop the path,
-      // remember that waypoint as unreachable for 8 s, and let the think
-      // layer re-path around it (setPath excludes it from both path ends).
       const moved = Math.hypot(pos.x - bot.lastX, pos.z - bot.lastZ);
       if (moved > 0.2) { bot.lastX = pos.x; bot.lastZ = pos.z; bot.lastMoveT = api.time(); }
       else if (bot.path.length && api.time() - bot.lastMoveT > 2.5) {
@@ -614,9 +572,6 @@ export function createBots(scene, world, api) {
         bot.group.position.x = bot.mover.state.position.x;
         bot.group.position.z = bot.mover.state.position.z;
         // keep the meshes' world matrices fresh for the hitscan raycast:
-        // the renderer normally does this every frame, but a headless
-        // fast-forward (no renders) would otherwise raycast against the
-        // bots' spawn positions and every shot would miss
         bot.group.updateMatrixWorld(true);
       }
     }

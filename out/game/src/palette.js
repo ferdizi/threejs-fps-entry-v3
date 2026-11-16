@@ -1,7 +1,7 @@
 // TIDEWATER — dawn at a container harbor. One accent (signal orange), one team blue,
 // and the dawn sky does the rest. The same names are the CSS custom properties in index.html.
 export const PALETTE = {
-  canvas: '#0e1a24', // deep harbor blue (fog / sky base)
+  canvas: '#251a14', // warm dusk dark (fog / sky base — sunset identity)
   surface: '#22303c', // steel blue-grey
   hairline: '#3a4a58', // weathered steel
   ink: '#eef2f0', // off-white

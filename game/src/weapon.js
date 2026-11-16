@@ -1,5 +1,4 @@
 // Weapons: five original guns, one economy. Accuracy is the skill: spread grows with
-// movement and sustained fire, crouching and standing still are rewarded, headshots x4.
 import * as THREE from 'three';
 import { PALETTE } from './palette.js';
 
@@ -32,13 +31,9 @@ export const WEAPONS = {
 };
 export const ARMOR_PRICE = 650;
 export const ARMOR_POINTS = 100;
+export const HELMET_PRICE = 350; // halves headshot damage while worn
 
 // Realistic viewmodels — top-LB study 2026-11-16 (rank 2 Lantern Rock pistol,
-// rank 3 CAMPANILE rifle): the guns that read as REAL all show a HAND +
-// FOREARM holding the weapon, a ROUND barrel, warm wood furniture against
-// dark gunmetal, and the barrel canted up toward the crosshair. Boxes alone
-// read as a floating slab. The hand and the round barrel are what make the
-// brain accept it as a weapon.
 function std(color, roughness, metalness, extra = {}) {
   return new THREE.MeshStandardMaterial({ color: new THREE.Color(color), roughness, metalness, ...extra });
 }
@@ -58,8 +53,6 @@ function cyl(rTop, rBottom, len, mat, x = 0, y = 0, z = 0, seg = 12, rx = Math.P
 
 function buildViewModel(def) {
   // Lit materials on purpose: MeshBasicMaterial ignores lights entirely, so
-  // the vmLight added in createWeapon() had zero effect on the gun (the
-  // 2026-11-16 "dark silhouette" fix). Standard materials let vmLight work.
   const metal = std('#2f3338', 0.38, 0.65);
   const metalLight = std('#4a5058', 0.45, 0.5);
   const dark = std('#1d2023', 0.5, 0.4);
@@ -71,15 +64,12 @@ function buildViewModel(def) {
   const glass = std('#9fd8e8', 0.15, 0.1, { emissive: new THREE.Color('#3a6a7a'), emissiveIntensity: 0.5 });
   const model = new THREE.Group();
   // Inner group carries the permanent cant: barrel rises toward the
-  // crosshair like a real held rifle. step() only touches the OUTER group's
-  // rotation.x / position.z, so this tilt survives recoil and reload.
   const inner = new THREE.Group();
   inner.rotation.x = 0.07;
   inner.rotation.z = -0.07;
   model.add(inner);
 
   // Hand + forearm: the hand wraps the pistol grip; the forearm runs down
-  // out of the frame, sleeve cuff at the bottom edge (like CAMPANILE).
   function handAndArm(gx, gy, gz, grx) {
     const g = new THREE.Group();
     g.position.set(gx, gy, gz);
@@ -171,8 +161,6 @@ function buildViewModel(def) {
   model.position.set(0.27, -0.22, -0.62);
   model.scale.set(1.25, 1.25, 1.25);
   // The viewmodel rides on the camera itself, so Three.js frustum culling
-  // can wrongly discard it (its world-space bounds sit inside the camera).
-  // Never cull the viewmodel — it must always be visible.
   model.traverse((o) => { o.frustumCulled = false; });
   return model;
 }
@@ -183,7 +171,6 @@ export function createWeapon(camera) {
   camera.add(model);
 
   // Dedicated light for the viewmodel so the gun is always clearly visible,
-  // even when the player stands in shadow. Short range so it barely touches the scene.
   const vmLight = new THREE.PointLight(new THREE.Color('#fff2dd'), 2.5, 3.0, 1.0);
   vmLight.position.set(0.1, 0.15, -0.35);
   camera.add(vmLight);
