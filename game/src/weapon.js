@@ -33,60 +33,142 @@ export const WEAPONS = {
 export const ARMOR_PRICE = 650;
 export const ARMOR_POINTS = 100;
 
+// Realistic viewmodels — top-LB study 2026-11-16 (rank 2 Lantern Rock pistol,
+// rank 3 CAMPANILE rifle): the guns that read as REAL all show a HAND +
+// FOREARM holding the weapon, a ROUND barrel, warm wood furniture against
+// dark gunmetal, and the barrel canted up toward the crosshair. Boxes alone
+// read as a floating slab. The hand and the round barrel are what make the
+// brain accept it as a weapon.
+function std(color, roughness, metalness, extra = {}) {
+  return new THREE.MeshStandardMaterial({ color: new THREE.Color(color), roughness, metalness, ...extra });
+}
+function box(w, h, d, mat, x = 0, y = 0, z = 0, rx = 0, rz = 0) {
+  const m = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), mat);
+  m.position.set(x, y, z);
+  m.rotation.x = rx;
+  m.rotation.z = rz;
+  return m;
+}
+function cyl(rTop, rBottom, len, mat, x = 0, y = 0, z = 0, seg = 12, rx = Math.PI / 2) {
+  const m = new THREE.Mesh(new THREE.CylinderGeometry(rTop, rBottom, len, seg), mat);
+  m.position.set(x, y, z);
+  m.rotation.x = rx;
+  return m;
+}
+
 function buildViewModel(def) {
   // Lit materials on purpose: MeshBasicMaterial ignores lights entirely, so
   // the vmLight added in createWeapon() had zero effect on the gun (the
   // 2026-11-16 "dark silhouette" fix). Standard materials let vmLight work.
-  const grip = new THREE.MeshStandardMaterial({ color: new THREE.Color('#3a3f46'), roughness: 0.7, metalness: 0.2 });
-  const body = new THREE.MeshStandardMaterial({ color: new THREE.Color('#8a939e'), roughness: 0.5, metalness: 0.35 });
-  const accent = new THREE.MeshStandardMaterial({ color: new THREE.Color(PALETTE.accent), roughness: 0.5, metalness: 0.1, emissive: new THREE.Color(PALETTE.accent), emissiveIntensity: 0.45 });
+  const metal = std('#2f3338', 0.38, 0.65);
+  const metalLight = std('#4a5058', 0.45, 0.5);
+  const dark = std('#1d2023', 0.5, 0.4);
+  const wood = std('#7a5a38', 0.75, 0.05);
+  const woodDark = std('#5d4126', 0.8, 0.05);
+  const skin = std('#c98f66', 0.7, 0);
+  const sleeve = std('#2e3a4d', 0.85, 0);
+  const accent = std(PALETTE.accent, 0.5, 0.1, { emissive: new THREE.Color(PALETTE.accent), emissiveIntensity: 0.4 });
+  const glass = std('#9fd8e8', 0.15, 0.1, { emissive: new THREE.Color('#3a6a7a'), emissiveIntensity: 0.5 });
   const model = new THREE.Group();
-  if (def.id === 'pistol') {
-    const slide = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.07, 0.26), body);
-    const handle = new THREE.Mesh(new THREE.BoxGeometry(0.055, 0.16, 0.08), grip);
-    handle.position.set(0, -0.09, 0.09);
-    model.add(slide, handle);
-  } else if (def.id === 'smg') {
-    const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.09, 0.34), body);
-    const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.3), grip);
-    barrel.position.set(0, 0.02, -0.3);
-    const mag = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.16, 0.07), accent);
-    mag.position.set(0, -0.11, -0.05);
-    model.add(receiver, barrel, mag);
-  } else if (def.id === 'shotgun') {
-    const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.1, 0.4), body);
-    const tube = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.44, 10), grip);
-    tube.rotation.x = Math.PI / 2;
-    tube.position.set(0, -0.03, -0.36);
-    const pump = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.07, 0.14), accent);
-    pump.position.set(0, -0.06, -0.3);
-    model.add(receiver, tube, pump);
-  } else if (def.id === 'sniper') {
-    const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.09, 0.46), body);
-    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.025, 0.025, 0.5, 10), grip);
-    barrel.rotation.x = Math.PI / 2;
-    barrel.position.set(0, 0.02, -0.44);
-    const scope = new THREE.Mesh(new THREE.CylinderGeometry(0.035, 0.035, 0.2, 10), accent);
-    scope.rotation.x = Math.PI / 2;
-    scope.position.set(0, 0.075, 0.02);
-    model.add(receiver, barrel, scope);
-  } else {
-    const receiver = new THREE.Mesh(new THREE.BoxGeometry(0.09, 0.1, 0.42), body);
-    const barrel = new THREE.Mesh(new THREE.BoxGeometry(0.045, 0.045, 0.4), grip);
-    barrel.position.set(0, 0.025, -0.38);
-    const stock = new THREE.Mesh(new THREE.BoxGeometry(0.075, 0.08, 0.22), grip);
-    stock.position.set(0, -0.02, 0.3);
-    const sight = new THREE.Mesh(new THREE.BoxGeometry(0.03, 0.05, 0.08), accent);
-    sight.position.set(0, 0.075, -0.05);
-    // Big orange parts so the gun reads at a glance at 1280x720.
-    const mag = new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.17, 0.08), accent);
-    mag.position.set(0, -0.12, -0.05);
-    const rail = new THREE.Mesh(new THREE.BoxGeometry(0.035, 0.02, 0.3), accent);
-    rail.position.set(0, 0.06, -0.12);
-    model.add(receiver, barrel, stock, sight, mag, rail);
+  // Inner group carries the permanent cant: barrel rises toward the
+  // crosshair like a real held rifle. step() only touches the OUTER group's
+  // rotation.x / position.z, so this tilt survives recoil and reload.
+  const inner = new THREE.Group();
+  inner.rotation.x = 0.07;
+  inner.rotation.z = -0.07;
+  model.add(inner);
+
+  // Hand + forearm: the hand wraps the pistol grip; the forearm runs down
+  // out of the frame, sleeve cuff at the bottom edge (like CAMPANILE).
+  function handAndArm(gx, gy, gz, grx) {
+    const g = new THREE.Group();
+    g.position.set(gx, gy, gz);
+    g.rotation.x = grx;
+    g.add(box(0.06, 0.1, 0.08, skin, 0, 0, 0)); // fist around the grip
+    g.add(box(0.02, 0.05, 0.025, skin, 0.032, 0.01, -0.01, 0, 0.4)); // thumb
+    g.add(cyl(0.042, 0.055, 0.42, skin, 0.01, -0.32, 0.14, 10, -0.47)); // forearm
+    g.add(cyl(0.058, 0.062, 0.16, sleeve, 0.015, -0.5, 0.24, 10, -0.47)); // cuff
+    return g;
   }
-  model.position.set(0.22, -0.2, -0.6);
-  model.scale.set(1.6, 1.6, 1.6);
+  // Curved box magazine: two segments along an arc, like a real rifle mag.
+  function curvedMag(x, y, z) {
+    const g = new THREE.Group();
+    g.add(box(0.045, 0.12, 0.07, metal, x, y, z, 0.12));
+    g.add(box(0.045, 0.1, 0.07, metal, x, y - 0.085, z + 0.03, 0.32));
+    g.add(box(0.05, 0.02, 0.08, accent, x, y - 0.135, z + 0.045, 0.32));
+    return g;
+  }
+
+  if (def.id === 'pistol') {
+    inner.add(box(0.055, 0.06, 0.26, metalLight, 0, 0.01, -0.02)); // slide
+    inner.add(box(0.05, 0.012, 0.2, dark, 0, 0.044, -0.02)); // slide top flat
+    inner.add(cyl(0.018, 0.018, 0.03, dark, 0, 0.01, -0.16, 10)); // muzzle
+    inner.add(box(0.01, 0.025, 0.01, dark, -0.015, 0.055, 0.08)); // rear sight
+    inner.add(box(0.01, 0.025, 0.01, dark, 0.015, 0.055, 0.08));
+    inner.add(box(0.008, 0.018, 0.008, accent, 0, 0.052, -0.13)); // front sight
+    inner.add(box(0.05, 0.15, 0.075, woodDark, 0, -0.1, 0.09, 0.25)); // grip
+    inner.add(handAndArm(0, -0.1, 0.09, 0.25));
+  } else if (def.id === 'smg') {
+    inner.add(box(0.08, 0.09, 0.34, metalLight, 0, 0, 0.02)); // receiver
+    inner.add(cyl(0.02, 0.02, 0.28, metal, 0, 0.02, -0.3, 12)); // round barrel
+    inner.add(cyl(0.028, 0.028, 0.05, dark, 0, 0.02, -0.44, 12)); // muzzle
+    inner.add(box(0.07, 0.07, 0.18, wood, 0, 0, -0.2)); // handguard
+    inner.add(box(0.06, 0.07, 0.12, metal, 0, -0.01, 0.22)); // stock
+    inner.add(box(0.05, 0.12, 0.06, woodDark, 0, -0.105, 0.08, 0.3)); // grip
+    inner.add(curvedMag(0, -0.06, -0.08));
+    inner.add(handAndArm(0, -0.105, 0.08, 0.3));
+  } else if (def.id === 'shotgun') {
+    inner.add(box(0.09, 0.1, 0.4, metalLight, 0, 0, 0)); // receiver
+    inner.add(cyl(0.03, 0.03, 0.44, metal, 0, 0.02, -0.38, 12)); // barrel
+    inner.add(cyl(0.025, 0.025, 0.4, metal, 0, -0.045, -0.36, 10)); // mag tube
+    inner.add(box(0.085, 0.075, 0.15, wood, 0, -0.05, -0.3)); // pump
+    inner.add(box(0.07, 0.09, 0.24, wood, 0, -0.035, 0.3, -0.1)); // stock
+    inner.add(box(0.075, 0.1, 0.03, dark, 0, -0.06, 0.42, -0.1)); // butt pad
+    inner.add(box(0.008, 0.02, 0.008, accent, 0, 0.055, -0.58)); // bead sight
+    inner.add(box(0.05, 0.12, 0.06, woodDark, 0, -0.105, 0.08, 0.3)); // grip
+    inner.add(handAndArm(0, -0.05, -0.3, 0)); // forward hand on the pump
+  } else if (def.id === 'sniper') {
+    inner.add(box(0.08, 0.09, 0.46, metalLight, 0, 0, 0)); // receiver
+    inner.add(cyl(0.02, 0.024, 0.52, metal, 0, 0.02, -0.45, 12)); // long barrel
+    inner.add(cyl(0.028, 0.028, 0.06, dark, 0, 0.02, -0.7, 12)); // muzzle
+    inner.add(cyl(0.032, 0.032, 0.22, dark, 0, 0.08, 0, 12)); // scope tube
+    inner.add(cyl(0.028, 0.028, 0.006, glass, 0, 0.08, -0.11, 12)); // front glass
+    inner.add(cyl(0.028, 0.028, 0.006, glass, 0, 0.08, 0.11, 12)); // rear glass
+    inner.add(box(0.02, 0.04, 0.03, metal, 0, 0.05, -0.06)); // scope mounts
+    inner.add(box(0.02, 0.04, 0.03, metal, 0, 0.05, 0.06));
+    inner.add(box(0.07, 0.09, 0.26, wood, 0, -0.035, 0.32, -0.1)); // stock
+    inner.add(box(0.05, 0.12, 0.06, woodDark, 0, -0.105, 0.08, 0.3)); // grip
+    inner.add(box(0.05, 0.02, 0.02, metalLight, 0.055, 0.02, 0.08)); // bolt handle
+    inner.add(handAndArm(0, -0.105, 0.08, 0.3));
+  } else {
+    // KR-77 LONGSHOT rifle — the showcase weapon in all 4 screenshots.
+    inner.add(box(0.09, 0.1, 0.4, metalLight, 0, 0, 0)); // receiver
+    inner.add(box(0.05, 0.015, 0.34, metal, 0, 0.056, -0.02)); // top rail
+    for (let i = 0; i < 4; i++) inner.add(box(0.052, 0.008, 0.02, dark, 0, 0.066, -0.14 + i * 0.08)); // rail ridges
+    inner.add(box(0.01, 0.02, 0.01, dark, -0.015, 0.068, 0.14)); // rear sight posts
+    inner.add(box(0.01, 0.02, 0.01, dark, 0.015, 0.068, 0.14));
+    inner.add(box(0.04, 0.006, 0.01, dark, 0, 0.08, 0.14)); // rear sight bar
+    inner.add(cyl(0.022, 0.022, 0.42, metal, 0, 0.02, -0.4, 12)); // ROUND barrel
+    inner.add(cyl(0.033, 0.033, 0.08, metalLight, 0, 0.02, -0.6, 12)); // muzzle brake
+    inner.add(cyl(0.035, 0.035, 0.008, dark, 0, 0.02, -0.58, 12)); // brake grooves
+    inner.add(cyl(0.035, 0.035, 0.008, dark, 0, 0.02, -0.62, 12));
+    inner.add(cyl(0.048, 0.048, 0.3, metal, 0, 0.01, -0.32, 8)); // octagonal dark handguard
+    inner.add(cyl(0.051, 0.051, 0.015, metalLight, 0, 0.01, -0.2, 8)); // handguard bands
+    inner.add(cyl(0.051, 0.051, 0.015, metalLight, 0, 0.01, -0.44, 8));
+    inner.add(cyl(0.008, 0.008, 0.035, dark, 0, 0.065, -0.46, 6)); // front sight post
+    inner.add(box(0.01, 0.025, 0.01, dark, -0.02, 0.06, -0.46)); // front sight wings
+    inner.add(box(0.01, 0.025, 0.01, dark, 0.02, 0.06, -0.46));
+    inner.add(box(0.07, 0.09, 0.24, wood, 0, -0.035, 0.3, -0.1)); // wood stock
+    inner.add(box(0.075, 0.1, 0.03, dark, 0, -0.06, 0.42, -0.1)); // butt pad
+    inner.add(box(0.05, 0.13, 0.06, woodDark, 0, -0.11, 0.06, 0.35)); // pistol grip
+    inner.add(curvedMag(0, -0.06, -0.06)); // curved magazine
+    inner.add(box(0.012, 0.04, 0.015, dark, 0, -0.065, -0.01, 0.2)); // trigger
+    inner.add(box(0.02, 0.02, 0.05, metalLight, 0.052, 0.01, 0.06)); // charging handle
+    inner.add(box(0.004, 0.03, 0.09, dark, 0.046, 0.02, -0.06)); // ejection port
+    inner.add(handAndArm(0, -0.11, 0.06, 0.35)); // hand + forearm on the grip
+  }
+  model.position.set(0.26, -0.2, -0.62);
+  model.scale.set(1.25, 1.25, 1.25);
   // The viewmodel rides on the camera itself, so Three.js frustum culling
   // can wrongly discard it (its world-space bounds sit inside the camera).
   // Never cull the viewmodel — it must always be visible.
@@ -109,12 +191,12 @@ export function createWeapon(camera) {
     new THREE.PlaneGeometry(0.17, 0.17),
     new THREE.MeshBasicMaterial({ color: new THREE.Color(PALETTE.sun), transparent: true, opacity: 0.9, depthWrite: false, side: THREE.DoubleSide }),
   );
-  flash.position.set(0.27, -0.16, -1.25);
+  flash.position.set(0.27, -0.18, -1.5);
   flash.visible = false;
   flash.frustumCulled = false;
   camera.add(flash);
   const flashLight = new THREE.PointLight(new THREE.Color(PALETTE.accent), 0, 6);
-  flashLight.position.set(0.27, -0.16, -1.3);
+  flashLight.position.set(0.27, -0.18, -1.55);
   camera.add(flashLight);
 
   const state = {
